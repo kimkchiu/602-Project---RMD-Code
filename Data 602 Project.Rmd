@@ -1,0 +1,914 @@
+---
+title: "Data 602 - Project"
+output:
+  html_notebook: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+date: "Kimberley Chiu, Brendan Moorhouse, Justyce Wright"
+---
+
+```{r include=FALSE}
+library(binom)
+library(collapsibleTree)
+library(dbplyr)
+library(devtools)
+library(dplyr)
+library(EnvStats)
+library(ggformula)
+library(ggplot2)
+library(ggpubr)
+library(htmltools)
+library(ISLR)
+library(knitr)
+library(lawstat)
+library(markdown)
+library(mosaic)
+library(mdsr)
+library(mosaicData)
+library(nycflights13)
+library(plyr)
+library(purrr)
+library(rmarkdown)
+library(stringi)
+library(tibble)
+library(tidyr)
+library(tidyselect)
+library(tinytex)
+library(yaml)
+library(reshape)
+library(caTools)
+library(magrittr)
+options(tinytex.verbose = TRUE)
+```
+
+PROJECT QUESTIONS:
+
+1. Data Visualization, or ‘time to play’. Depending on the type of data analysis you will be conducting, create an appropriate visualization of the data. This may be in the form a scatterplot, a series of histograms, density plots, or boxplots. Ensure you provide commentary that addresses your learning of the data from these graphs/plots. These need to be done in R/R Studio.
+2. Condition  Checking:  The  statistical  method  you  are  to  apply  to  investigate  ‘what  is  happening  statistically’ may have certain conditions/assumptions about the data. Do these conditions/assumption(s) appear to hold? 
+How can you tell? What data visualizations are needed in order to check these conditions/assumptions?  What if the conditions/assumptions do not hold, what then can you do? 
+3. Data Analysis: In this piece, simply provide the relevant R/R Studio output. There is NO NEED to give formulas, plug the numbers into formulas to ‘verify’ the various statistics appearing in the R/R Studio output.  
+4. Inference Piece: What conclusion(s) or inference(s) can you make from your data? What inference(s) can you not make? Are there limitations to your findings? 
+
+
+```{r}
+#READING IN THE DATA CSV
+df = read.csv('FINAL_FUEL_RATINGS.csv')
+head(df)
+tail(df)
+```
+
+
+1. Verify that average CO2 emission has decreased in vehicles from 2020 compared to 2000 -  Test hypothesis by analyzing per class type
+
+We will look at the average emissions of ALL cars in 2020 and 2000 as an overview. Then go into the different class types and dive deeper in this category to compare the average emissions between 2020 and 2000.
+
+
+Out statistical hypothesis is that on average, the emissions for 2020 cars is less than the average emissions of 2000 vehicles.
+
+$$
+\begin{align}
+{\rm H}_{0}: \mu_{2000} \hspace{0.2in}   \leq  & \hspace{0.2in}  \mu_{2020} \hspace{0.2in} \equiv \hspace{0.2in}\mu_{2000} - \mu_{2020} \leq \hspace{0.2in}  0\\
+{\rm H}_{A}: \mu_{2000} \hspace{0.2in}  > & \hspace{0.2in} \mu_{2020} \hspace{0.2in} \equiv \hspace{0.2in}\mu_{2000} - \mu_{2020} > \hspace{0.2in}  0\\
+\end{align}
+$$
+
+```{r}
+#NO FILTER, all cars for 2020 and 2000
+
+
+#CHANGE YEAR TO STRING TO PLOT
+df['YEAR']<- lapply(df['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=df, aes(x = YEAR, y = CO2_EMISSIONS)) + geom_violin(col='blue', fill='dark green') + geom_boxplot(width=0.2) +  xlab("YEAR") + ylab("CO2 Emissions (g/km)") + coord_flip() +ggtitle("Average Emissions for All 2020 Vehicles and 2000 Vehicles")
+
+
+
+```
+
+```{r}
+#CHECKING FOR NORMALITY ON DF GENERAL
+ggplot(data=filter(df, YEAR=="2000"), aes(sample = CO2_EMISSIONS)) + stat_qq(size=2, col='dark green') + stat_qqline(col='red') + ggtitle("Normal Probability Plot - ALL 2000 Vehicles CO2 Emissions ")
+
+ggplot(data=filter(df, YEAR=="2020"), aes(sample = CO2_EMISSIONS)) + stat_qq(size=2, col='dark green') + stat_qqline(col='red') + ggtitle("Normal Probability Plot - ALL 2020 Vehicles CO2 Emissions  ")
+
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = df) 
+
+```
+
+By conducting t-test on main df:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = df, alternative = 'greater')
+
+```
+The test statistic of t = 13.288. The P(T > 13.288) or p-value is 0.00000000000000022. We would infer that the null hypothesis be rejected and conclude the alternative hypothesis, that the average emissions of vehicles from 2020 are lower than the average emissions of vehicles from 2000.
+
+
+
+We will conduct a permutation test:
+```{r}
+n.2020all = favstats(~CO2_EMISSIONS | YEAR, data = df)$n[2]
+n.2000all = favstats(~CO2_EMISSIONS | YEAR, data = df)$n[1]
+n.total.all = n.2000all + n.2020all
+
+obs_meanall =  favstats(~CO2_EMISSIONS | YEAR, data = df)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = df)$mean[2]
+obs_meanall
+
+N.Perms1 = 2000
+outcome.perm = numeric(N.Perms1)
+
+for(i in 1:N.Perms1)
+{
+  
+  index = sample(n.total.all, n.2000all, replace=FALSE)
+  outcome.perm[i] = mean(df$CO2_EMISSIONS[index]) - mean(df$CO2_EMISSIONS[-index])
+}
+perm.dfall = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.dfall$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 (All Vehicles)", col="dark green", ylab="Count", main="Permutation Dist")
+abline(v=obs_meanall, col="red")
+
+#EMP P-Value
+emp.pvalue1 = sum(perm.dfall$outcome.perm >= obs_meanall)/N.Perms1
+emp.pvalue1
+
+```
+```{r}
+#BOOTSTRAP FOR CI for ALL
+N.Boot1 = 2000
+
+mean.2020all = numeric(N.Boot1)
+mean.2000all = numeric(N.Boot1)
+diff.meanall = numeric(N.Boot1)
+
+# Start the for loop
+for(i in 1:N.Boot1)
+  
+{   
+      mean.2020all[i] = mean(sample(filter(df, YEAR == 2020)$CO2_EMISSIONS, n.2020all, replace=TRUE))
+      mean.2000all[i] = mean(sample(filter(df, YEAR == 2000)$CO2_EMISSIONS, n.2000all, replace=TRUE))
+      diff.meanall[i] = mean.2000all[i] - mean.2020all[i] 
+}
+
+bootstrap1 = data.frame(mean.2000all, mean.2020all, diff.meanall) #create a data frame
+head(bootstrap1)
+
+#PLOT
+ggplot(data=bootstrap1, aes(x = diff.meanall)) + geom_histogram(fill='dark green', col='red', binwidth=2) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020 (ALL)") + ggtitle("Distribution of Bootstrap Stat")
+
+#95%CI
+qdata(~ diff.meanall, c(0.025, 0.975), data=bootstrap1)
+lb1 = qdata(~ diff.meanall, c(0.025, 0.975), data=bootstrap1)[1]
+ub1 = qdata(~ diff.meanall, c(0.025, 0.975), data=bootstrap1)[2]
+```
+The 95% CI for average emissions_2000 - average emissions_2020 is between `r lb1` and `r ub1`.
+
+NOW: we will look at the difference in emissions for different vehicle class types.
+
+```{r}
+#Extracting unique class types from CLASS column of df
+#We will group together SUV, SUV:STANDARD, SUV:SMALL
+unique(df$CLASS)
+```
+We will group the following categories by class in this method:
+
+1) SUV, SUV: SMALL, SUV: STANDARD
+2) COMPACT, SUBCOMPACT,  MINICOMPACT
+3) MID-SIZE, FULL-SIZE 
+4) TWO-SEATER  
+5) PICKUP TRUCK: SMALL, PICKUP TRUCK: STANDARD
+6) VAN: CARGO,  VAN: PASSENGER,  MINIVAN 
+7) STATION WAGON: SMALL, STATION WAGON: MID-SIZE
+
+```{r}
+#1) FILTER DF FOR SUVS
+#new.df_SUV
+new.df_SUV  <- subset(df , CLASS == 'SUV' | CLASS == 'SUV: SMALL' | CLASS == 'SUV: STANDARD')
+
+head(new.df_SUV)
+tail(new.df_SUV)
+
+#CHANGE YEAR TO STRING TO PLOT
+#new.df_SUV['YEAR']<- lapply(new.df['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_SUV, aes(x = YEAR, y = CO2_EMISSIONS)) + geom_violin(col='red', fill='purple') + geom_boxplot(width=0.2) +  xlab("YEAR") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Average Emissions for SUV, SUV: SMALL, SUV: STANDARD")
+
+```
+
+```{r}
+
+ggplot(data=filter(new.df_SUV, CLASS=="SUV"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot SUV ")
+
+ggplot(data=filter(new.df_SUV, CLASS=="SUV: SMALL"), aes(sample = CO2_EMISSIONS, colour  = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot SUV: SMALL")
+
+ggplot(data=filter(new.df_SUV, CLASS=="SUV: STANDARD"), aes(sample = CO2_EMISSIONS, colour  = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot SUV: STANDARD")
+
+```
+
+
+By conducting t-test on SUV df:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_SUV, alternative = 'greater')
+
+```
+```{r}
+#DEFINE ns
+n.2020SUV = favstats(~CO2_EMISSIONS | YEAR, data = new.df_SUV)$n[2]
+n.2000SUV = favstats(~CO2_EMISSIONS | YEAR, data = new.df_SUV)$n[1]
+n.total.SUV = n.2000all + n.2020all
+
+#BOOTSTRAP FOR CI for SUV
+N.BootSUV = 2000
+
+mean.2020SUV = numeric(N.BootSUV)
+mean.2000SUV = numeric(N.BootSUV)
+diff.meanSUV = numeric(N.BootSUV)
+
+# Start the for loop
+for(i in 1:N.BootSUV)
+  
+{   
+      mean.2020SUV[i] = mean(sample(filter(new.df_SUV, YEAR == 2020)$CO2_EMISSIONS, n.2020SUV, replace=TRUE))
+      mean.2000SUV[i] = mean(sample(filter(new.df_SUV, YEAR == 2000)$CO2_EMISSIONS, n.2000SUV, replace=TRUE))
+      diff.meanSUV[i] = mean.2000SUV[i] - mean.2020SUV[i] 
+}
+
+bootstrapSUV = data.frame(mean.2000SUV, mean.2020SUV, diff.meanSUV) #create a data frame
+head(bootstrapSUV)
+
+#PLOT
+ggplot(data=bootstrapSUV, aes(x = diff.meanSUV)) + geom_histogram(fill='purple', col='red', binwidth=2) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020 for SUVs") + ggtitle("Distribution of Bootstrap Stat: Average CO2 Emissions 2000 - 2020 for SUVs")
+
+#95%CI
+qdata(~ diff.meanSUV, c(0.025, 0.975), data=bootstrapSUV)
+lb.SUV = qdata(~ diff.meanSUV, c(0.025, 0.975), data=bootstrapSUV)[1]
+ub.SUV = qdata(~ diff.meanSUV, c(0.025, 0.975), data=bootstrapSUV)[2]
+```
+
+NOW WE LOOK AT COMPACTS, SUBCOMPACTS, MINICOMPACTS
+
+```{r}
+#2) COMPACTS, SUBCOMPACTS, MINICOMPACTS
+#new.df = df
+new.df_COMPACTS  <- subset(df , CLASS == 'COMPACT' | CLASS == 'SUBCOMPACT' | CLASS == 'MINICOMPACT')
+
+head(new.df_COMPACTS)
+tail(new.df_COMPACTS)
+
+#CHANGE YEAR TO STRING TO PLOT
+new.df_COMPACTS['YEAR']<- lapply(new.df_COMPACTS['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_COMPACTS, aes(x = CLASS, y = CO2_EMISSIONS, fill = YEAR)) + geom_violin(col='red', fill='blue') + geom_boxplot(width=0.2) +  xlab("YEAR") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Average Emissions for COMPACT, SUBCOMPACTS, MINICOMPACTS")
+
+
+
+```
+
+```{r}
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS) 
+```
+
+```{r}
+#CHECKING FOR NORMALITY
+ggplot(data=filter(new.df_COMPACTS, CLASS=="COMPACT"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot COMPACT ")
+
+ggplot(data=filter(new.df_COMPACTS, CLASS=="SUBCOMPACT"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot SUBCOMPACT ")
+
+ggplot(data=filter(new.df_COMPACTS, CLASS=="MINICOMPACT"), aes(sample = CO2_EMISSIONS, colour  = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot MINI COMPACT ")
+
+
+ggplot(data=new.df_COMPACTS, aes(sample = CO2_EMISSIONS, colour  = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot COMPACT GROUP")
+```
+By conducting t-test:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_COMPACTS, alternative = 'greater')
+
+```
+
+We will also conduct the permutation test:
+```{r}
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS)$n[1]
+n.total = n.2000 + n.2020
+
+obs_mean =  favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS)$mean[2]
+obs_mean
+
+N.Perms = 2000
+outcome.perm = numeric(N.Perms)
+
+for(i in 1:N.Perms)
+{
+  
+  index = sample(n.total, n.2000, replace=FALSE)
+  outcome.perm[i] = mean(new.df_COMPACTS$CO2_EMISSIONS[index]) - mean(new.df_COMPACTS$CO2_EMISSIONS[-index])
+}
+perm.df = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.df$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 FOR COMPACTS", col="blue", ylab="Count", main="Permutatation: verage Emissions 2000 - Average Emissions 2020 (COMPACTS)")
+abline(v=obs_mean, col="red")
+
+#EMP P-Value
+emp.pvalue = sum(perm.df$outcome.perm >= obs_mean)/N.Perms
+emp.pvalue
+
+```
+
+
+```{r}
+#BOOTSTRAP FOR CI
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_COMPACTS)$n[1]
+n.total = n.2000 + n.2020
+
+N.Boot = 2000
+
+mean.2020 = numeric(N.Boot)
+mean.2000 = numeric(N.Boot)
+diff.mean = numeric(N.Boot)
+
+# Start the for loop
+for(i in 1:N.Boot)
+  
+{   
+      mean.2020[i] = mean(sample(filter(new.df_COMPACTS, YEAR == 2020)$CO2_EMISSIONS, n.2020, replace=TRUE))
+      mean.2000[i] = mean(sample(filter(new.df_COMPACTS, YEAR == 2000)$CO2_EMISSIONS, n.2000, replace=TRUE))
+      diff.mean[i] = mean.2000[i] - mean.2020[i] 
+}
+
+bootstrap = data.frame(mean.2000, mean.2020, diff.mean) #create a data frame
+head(bootstrap)
+
+#PLOT
+ggplot(data=bootstrap, aes(x = diff.mean)) + geom_histogram(fill='blue', col='red', binwidth=1) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020") + ggtitle("Distribution of Bootstrap Stat: Average CO2 Emissions 2000 - 2020")
+
+#95%CI
+qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)
+lb = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[1]
+ub = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[2]
+```
+We would reject the null hypothesis, in favour of the alternatve hypothesis, that average CO2 Emissions for 2020 cars are less than average CO2 Emissions for 2000 cars in the COMPACT, SUBCOMPACT, MINICOMPACT class type. 
+
+The 95% CI for the difference in emissions (2000 - 2020) is between `r lb` and `r ub`.
+
+
+```{r}
+#3) MIDSIZE AND FULLSIZE
+#new.df = df
+new.df_mf  <- subset(df , CLASS == 'MID-SIZE' | CLASS == 'FULL-SIZE')
+
+head(new.df_mf)
+tail(new.df_mf)
+
+#CHANGE YEAR TO STRING TO PLOT
+new.df_mf['YEAR']<- lapply(new.df_mf['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_mf, aes(x = CLASS, y = CO2_EMISSIONS, fill = YEAR)) + geom_violin(col='red', fill='turquoise') + geom_boxplot(width=0.2) +  xlab("TYPE") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Average Emissions for MID-SIZE , FULL-SIZE")
+
+
+
+```
+
+```{r}
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf) 
+```
+
+```{r}
+#CHECKING FOR NORMALITY
+ggplot(data=filter(new.df_mf, CLASS=="MID-SIZE"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot MID-SIZE ")
+
+ggplot(data=filter(new.df_mf, CLASS=="FULL-SIZE"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot FULL-SIZE ")
+
+ggplot(new.df_mf, aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot MID-SIZE and FULL-SIZE ")
+
+```
+By conducting t-test:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_mf, alternative = 'greater')
+
+```
+
+We will also conduct the permutation test:
+```{r}
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf)$n[1]
+n.total = n.2000 + n.2020
+
+obs_mean =  favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf)$mean[2]
+obs_mean
+
+N.Perms = 2000
+outcome.perm = numeric(N.Perms)
+
+for(i in 1:N.Perms)
+{
+  
+  index = sample(n.total, n.2000, replace=FALSE)
+  outcome.perm[i] = mean(new.df_mf$CO2_EMISSIONS[index]) - mean(new.df_mf$CO2_EMISSIONS[-index])
+}
+perm.df = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.df$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 FOR MID SIZE AND FULL SIZE", col="turquoise", ylab="Count", main="Distribution of Average Emissions 2000 - Average Emissions 2020")
+abline(v=obs_mean, col="red")
+
+#EMP P-Value
+emp.pvalue = sum(perm.df$outcome.perm >= obs_mean)/N.Perms
+emp.pvalue
+
+```
+
+
+```{r}
+#BOOTSTRAP FOR CI
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_mf)$n[1]
+n.total = n.2000 + n.2020
+
+N.Boot = 2000
+
+mean.2020 = numeric(N.Boot)
+mean.2000 = numeric(N.Boot)
+diff.mean = numeric(N.Boot)
+
+# Start the for loop
+for(i in 1:N.Boot)
+  
+{   
+      mean.2020[i] = mean(sample(filter(new.df_mf, YEAR == 2020)$CO2_EMISSIONS, n.2020, replace=TRUE))
+      mean.2000[i] = mean(sample(filter(new.df_mf, YEAR == 2000)$CO2_EMISSIONS, n.2000, replace=TRUE))
+      diff.mean[i] = mean.2000[i] - mean.2020[i] 
+}
+
+bootstrap = data.frame(mean.2000, mean.2020, diff.mean) #create a data frame
+head(bootstrap)
+
+#PLOT
+ggplot(data=bootstrap, aes(x = diff.mean)) + geom_histogram(fill='turquoise', col='red', binwidth=1) + xlab("Difference Average CO2 Emissions 2000 - 2020") + ggtitle("Distribution of Bootstrap Difference (MIDSIZE and FULLSIZE)")
+
+#95%CI
+qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)
+lb = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[1]
+ub = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[2]
+```
+We would reject the null hypothesis, in favour of the alternatve hypothesis, that average CO2 Emissions for 2020 cars are less than average CO2 Emissions for 2000 cars in the MIDSIZE and FULLSIZE class type. 
+
+The 95% CI for the difference in emissions (2000 - 2020) is between `r lb` and `r ub`.
+
+
+*INTERESTINGLY ENOUGH - FOR 2 SEATER CATEGORY - CANNOT REJECT NULL H*
+
+```{r}
+#4) TWO-SEATER 
+#new.df = df
+new.df_2  <- subset(df , CLASS == 'TWO-SEATER')
+
+head(new.df_2)
+tail(new.df_2)
+
+#CHANGE YEAR TO STRING TO PLOT
+new.df_2['YEAR']<- lapply(new.df_2['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_2, aes(x = CLASS, y = CO2_EMISSIONS, fill = YEAR)) + geom_violin(col='red', fill='pink') + geom_boxplot(width=0.2) +  xlab("TYPE") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Average Emissions for TWO-SEATER ")
+
+
+
+```
+
+```{r}
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = new.df_2) 
+```
+
+```{r}
+#CHECKING FOR NORMALITY
+ggplot(data=filter(new.df_2), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot TWO-SEATER  ")
+
+```
+By conducting t-test:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_2, alternative = 'greater')
+
+```
+
+We will also conduct the permutation test:
+```{r}
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_2)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_2)$n[1]
+n.total = n.2000 + n.2020
+
+obs_mean =  favstats(~CO2_EMISSIONS | YEAR, data = new.df_2)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = new.df_2)$mean[2]
+obs_mean
+
+N.Perms = 2000
+outcome.perm = numeric(N.Perms)
+
+for(i in 1:N.Perms)
+{
+  
+  index = sample(n.total, n.2000, replace=FALSE)
+  outcome.perm[i] = mean(new.df_2$CO2_EMISSIONS[index]) - mean(new.df_2$CO2_EMISSIONS[-index])
+}
+perm.df = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.df$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 FOR TWO- SEATER", col="pink", ylab="Count", main="Permutation of Difference in Emissions (TWO- SEATER)")
+abline(v=obs_mean, col="red")
+
+#EMP P-Value
+emp.pvalue = sum(perm.df$outcome.perm >= obs_mean)/N.Perms
+emp.pvalue
+
+```
+
+
+```{r}
+#BOOTSTRAP FOR CI
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_2)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_2)$n[1]
+n.total = n.2000 + n.2020
+
+N.Boot = 2000
+
+mean.2020 = numeric(N.Boot)
+mean.2000 = numeric(N.Boot)
+diff.mean = numeric(N.Boot)
+
+# Start the for loop
+for(i in 1:N.Boot)
+  
+{   
+      mean.2020[i] = mean(sample(filter(new.df_2, YEAR == 2020)$CO2_EMISSIONS, n.2020, replace=TRUE))
+      mean.2000[i] = mean(sample(filter(new.df_2, YEAR == 2000)$CO2_EMISSIONS, n.2000, replace=TRUE))
+      diff.mean[i] = mean.2000[i] - mean.2020[i] 
+}
+
+bootstrap = data.frame(mean.2000, mean.2020, diff.mean) #create a data frame
+head(bootstrap)
+
+#PLOT
+ggplot(data=bootstrap, aes(x = diff.mean)) + geom_histogram(fill='pink', col='red', binwidth=7) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020") + ggtitle("Bootstrap Dist: Difference in Average CO2 Emissions 2000 - 2020 (2 SEATER)")
+
+#95%CI
+qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)
+lb = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[1]
+ub = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[2]
+```
+
+
+```{r}
+#5) PICKUP TRUCK: SMALL, PICKUP TRUCK: STANDARD
+#new.df = df
+new.df_p  <- subset(df , CLASS == ' PICKUP TRUCK: SMALL' | CLASS == 'PICKUP TRUCK: STANDARD')
+
+head(new.df_p)
+tail(new.df_p)
+
+#CHANGE YEAR TO STRING TO PLOT
+new.df_p['YEAR']<- lapply(new.df_p['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_p, aes(x = YEAR, y = CO2_EMISSIONS)) + geom_violin(col='red', fill='orange') + geom_boxplot(width=0.2) +  xlab("TYPE") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Average Emissions for PICKUP TRUCK: SMALL, PICKUP TRUCK: STANDARD")
+
+
+
+```
+
+```{r}
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = new.df_p) 
+```
+
+```{r}
+#CHECKING FOR NORMALITY
+ggplot(new.df_p, aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot PICK UP TRUCKS ")
+
+
+```
+By conducting t-test:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_p, alternative = 'greater')
+
+```
+
+We will also conduct the permutation test:
+```{r}
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_p)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_p)$n[1]
+n.total = n.2000 + n.2020
+
+obs_mean =  favstats(~CO2_EMISSIONS | YEAR, data = new.df_p)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = new.df_p)$mean[2]
+obs_mean
+
+N.Perms = 2000
+outcome.perm = numeric(N.Perms)
+
+for(i in 1:N.Perms)
+{
+  
+  index = sample(n.total, n.2000, replace=FALSE)
+  outcome.perm[i] = mean(new.df_p$CO2_EMISSIONS[index]) - mean(new.df_p$CO2_EMISSIONS[-index])
+}
+perm.df = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.df$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 FOR MID SIZE AND FULL SIZE", col="turquoise", ylab="Count", main="Distribution of Average Emissions 2000 - Average Emissions 2020")
+abline(v=obs_mean, col="red")
+
+#EMP P-Value
+emp.pvalue = sum(perm.df$outcome.perm >= obs_mean)/N.Perms
+emp.pvalue
+
+```
+
+
+```{r}
+#BOOTSTRAP FOR CI
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_p)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_p)$n[1]
+n.total = n.2000 + n.2020
+
+N.Boot = 2000
+
+mean.2020 = numeric(N.Boot)
+mean.2000 = numeric(N.Boot)
+diff.mean = numeric(N.Boot)
+
+# Start the for loop
+for(i in 1:N.Boot)
+  
+{   
+      mean.2020[i] = mean(sample(filter(new.df_p, YEAR == 2020)$CO2_EMISSIONS, n.2020, replace=TRUE))
+      mean.2000[i] = mean(sample(filter(new.df_p, YEAR == 2000)$CO2_EMISSIONS, n.2000, replace=TRUE))
+      diff.mean[i] = mean.2000[i] - mean.2020[i] 
+}
+
+bootstrap = data.frame(mean.2000, mean.2020, diff.mean) #create a data frame
+head(bootstrap)
+
+#PLOT
+ggplot(data=bootstrap, aes(x = diff.mean)) + geom_histogram(fill='turquoise', col='red', binwidth=1) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020") + ggtitle("Distribution of Bootstrap Stat: Average CO2 Emissions 2000 - 2020")
+
+#95%CI
+qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)
+lb = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[1]
+ub = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[2]
+```
+We would reject the null hypothesis, in favour of the alternatve hypothesis, that average CO2 Emissions for 2020 cars are less than average CO2 Emissions for 2000 cars in the MIDSIZE and FULLSIZE class type. 
+
+The 95% CI for the difference in emissions (2000 - 2020) is between `r lb` and `r ub`.
+
+
+```{r}
+#6)  VAN: CARGO,  VAN: PASSENGER,  MINIVAN 
+
+
+#new.df = df
+new.df_v  <- subset(df , CLASS == 'VAN: CARGO' | CLASS == 'VAN: PASSENGER' | CLASS == 'MINIVAN')
+
+head(new.df_v)
+tail(new.df_v)
+
+#CHANGE YEAR TO STRING TO PLOT
+new.df_v['YEAR']<- lapply(new.df_v['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_v, aes(x = CLASS, y = CO2_EMISSIONS, fill = YEAR)) + geom_violin(col='red', fill='darkseagreen') + geom_boxplot(width=0.2) +  xlab("YEAR") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Average Emissions for VAN: CARGO,  VAN: PASSENGER,  MINIVAN ")
+
+
+
+```
+
+```{r}
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = new.df_v) 
+```
+
+```{r}
+#CHECKING FOR NORMALITY
+ggplot(data=filter(new.df_v, CLASS=="VAN: CARGO"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot VAN CARGO ")
+
+ggplot(data=filter(new.df_v, CLASS=="VAN: PASSENGER"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot VAN PASSENGER ")
+
+ggplot(data=filter(new.df_v, CLASS=="MINIVAN"), aes(sample = CO2_EMISSIONS, colour  = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot MINIVAN ")
+
+ggplot(data=new.df_v, aes(sample = CO2_EMISSIONS, colour  = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot VAN Group ")
+```
+By conducting t-test:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_v, alternative = 'greater')
+
+```
+
+We will also conduct the permutation test:
+```{r}
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_v)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_v)$n[1]
+n.total = n.2000 + n.2020
+
+obs_mean =  favstats(~CO2_EMISSIONS | YEAR, data = new.df_v)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = new.df_v)$mean[2]
+obs_mean
+
+N.Perms = 2000
+outcome.perm = numeric(N.Perms)
+
+for(i in 1:N.Perms)
+{
+  
+  index = sample(n.total, n.2000, replace=FALSE)
+  outcome.perm[i] = mean(new.df_v$CO2_EMISSIONS[index]) - mean(new.df_v$CO2_EMISSIONS[-index])
+}
+perm.df = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.df$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 VAN GROUP", col="darkseagreen", ylab="Count", main="Permutation of Average Emissions 2000 - 2020 (VAN GROUP)")
+abline(v=obs_mean, col="red")
+
+#EMP P-Value
+emp.pvalue = sum(perm.df$outcome.perm >= obs_mean)/N.Perms
+emp.pvalue
+
+```
+
+
+```{r}
+#BOOTSTRAP FOR CI
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_v)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_v)$n[1]
+n.total = n.2000 + n.2020
+
+N.Boot = 2000
+
+mean.2020 = numeric(N.Boot)
+mean.2000 = numeric(N.Boot)
+diff.mean = numeric(N.Boot)
+
+# Start the for loop
+for(i in 1:N.Boot)
+  
+{   
+      mean.2020[i] = mean(sample(filter(new.df_v, YEAR == 2020)$CO2_EMISSIONS, n.2020, replace=TRUE))
+      mean.2000[i] = mean(sample(filter(new.df_v, YEAR == 2000)$CO2_EMISSIONS, n.2000, replace=TRUE))
+      diff.mean[i] = mean.2000[i] - mean.2020[i] 
+}
+
+bootstrap = data.frame(mean.2000, mean.2020, diff.mean) #create a data frame
+head(bootstrap)
+
+#PLOT
+ggplot(data=bootstrap, aes(x = diff.mean)) + geom_histogram(fill='darkseagreen', col='red', binwidth=5) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020") + ggtitle("Bootstrap Diff: Average CO2 Emissions 2000 - 2020 (VAN GROUP)")
+
+#95%CI
+qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)
+lb = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[1]
+ub = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[2]
+```
+We would reject the null hypothesis, in favour of the alternatve hypothesis, that average CO2 Emissions for 2020 cars are less than average CO2 Emissions for 2000 cars in the VAN class type. 
+
+
+```{r}
+#7) STATION WAGON: SMALL, STATION WAGON: MID-SIZE
+
+#new.df = df
+new.df_s  <- subset(df , CLASS == 'STATION WAGON: SMALL' | CLASS == 'STATION WAGON: MID-SIZE')
+
+head(new.df_s)
+tail(new.df_s)
+
+#CHANGE YEAR TO STRING TO PLOT
+new.df_s['YEAR']<- lapply(new.df_s['YEAR'], function(x) if(is.integer(x)) as.character(x) else x)
+
+ggplot(data=new.df_s, aes(x = CLASS, y = CO2_EMISSIONS, fill = YEAR)) + geom_violin(col='black', fill='lavender') + geom_boxplot(width=0.2) +  xlab("YEAR") + ylab("CO2_Emissions") + coord_flip() +ggtitle("Ave Emissions for STATION WAGON: SMALL and MID-SIZE")
+
+
+
+```
+
+```{r}
+#extracting favstats grouped by Year
+favstats(~CO2_EMISSIONS | YEAR, data = new.df_s) 
+```
+
+```{r}
+#CHECKING FOR NORMALITY
+ggplot(data=filter(new.df_s, CLASS=="STATION WAGON: SMALL"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot STATION WAGON: SMALL")
+
+ggplot(data=filter(new.df_s, CLASS=="STATION WAGON: MID-SIZE"), aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot  STATION WAGON: MID-SIZE ")
+
+
+ggplot(new.df_s, aes(sample = CO2_EMISSIONS, colour = YEAR)) + stat_qq(size=2) + stat_qqline() + ggtitle("Normal Probability Plot - STATION WAGON group ")
+
+```
+By conducting t-test:
+```{r}
+t.test(CO2_EMISSIONS~YEAR,data = new.df_s, alternative = 'greater')
+
+```
+
+We will also conduct the permutation test:
+```{r}
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_s)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_s)$n[1]
+n.total = n.2000 + n.2020
+
+obs_mean =  favstats(~CO2_EMISSIONS | YEAR, data = new.df_s)$mean[1] - favstats(~CO2_EMISSIONS | YEAR, data = new.df_s)$mean[2]
+obs_mean
+
+N.Perms = 2000
+outcome.perm = numeric(N.Perms)
+
+for(i in 1:N.Perms)
+{
+  
+  index = sample(n.total, n.2000, replace=FALSE)
+  outcome.perm[i] = mean(new.df_s$CO2_EMISSIONS[index]) - mean(new.df_s$CO2_EMISSIONS[-index])
+}
+perm.df = data.frame(outcome.perm)
+
+#PLOT
+hist(perm.df$outcome.perm, xlab="Average Emissions 2000 - Average Emissions 2020 FOR COMPACTS", col="lavender", ylab="Count", main="Permutation of Average Emissions 2000 - 2020 (Station Wagons)")
+abline(v=obs_mean, col="red")
+
+#EMP P-Value
+emp.pvalue = sum(perm.df$outcome.perm >= obs_mean)/N.Perms
+emp.pvalue
+
+```
+
+
+```{r}
+#BOOTSTRAP FOR CI
+n.2020 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_s)$n[2]
+n.2000 = favstats(~CO2_EMISSIONS | YEAR, data = new.df_s)$n[1]
+n.total = n.2000 + n.2020
+
+N.Boot = 2000
+
+mean.2020 = numeric(N.Boot)
+mean.2000 = numeric(N.Boot)
+diff.mean = numeric(N.Boot)
+
+# Start the for loop
+for(i in 1:N.Boot)
+  
+{   
+      mean.2020[i] = mean(sample(filter(new.df_s, YEAR == 2020)$CO2_EMISSIONS, n.2020, replace=TRUE))
+      mean.2000[i] = mean(sample(filter(new.df_s, YEAR == 2000)$CO2_EMISSIONS, n.2000, replace=TRUE))
+      diff.mean[i] = mean.2000[i] - mean.2020[i] 
+}
+
+bootstrap = data.frame(mean.2000, mean.2020, diff.mean) #create a data frame
+head(bootstrap)
+
+#PLOT
+ggplot(data=bootstrap, aes(x = diff.mean)) + geom_histogram(fill='lavender', col='black', binwidth=6) + xlab("Distribution of Difference Average CO2 Emissions 2000 - 2020") + ggtitle("Bootstrap Difference: Average CO2 Emissions 2000 - 2020 - Station Wagons")
+
+#95%CI
+qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)
+lb = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[1]
+ub = qdata(~ diff.mean, c(0.025, 0.975), data=bootstrap)[2]
+```
+We would reject the null hypothesis, in favour of the alternatve hypothesis, that average CO2 Emissions for 2020 cars are less than average CO2 Emissions for 2000 cars in the STATION WAGON class type. 
+
+The 95% CI for the difference in emissions (2000 - 2020) is between `r lb` and `r ub`.
+
+*****
+OVERALL - comparing 2020 and 2000 vehicles, the average CO2 emissions has reduced in 2020. The null hypotehsis would be rejected in favour of the alternative hypothesis. However, upon deeper diving into the data, most class types concured except for the 2-Seater Cars (ie. R8 Coupe, Vantage V8), which can be concluded that 2020 cars of this class type seem to emit more emissions for CO2 in 2020 than in 2000.
+
+
+CHECKING LINEAR MODEL
+```{r}
+ggplot(data=filter(df, YEAR == '2020'), aes(x =ENGINE_SIZE, y = CO2_EMISSIONS)) + geom_point(col="blue", size=2, position="jitter") + xlab("R_Market ") + ylab("R_Suncor") + ggtitle("Scatterplot of R_Suncor to R_Market") + stat_smooth(method="lm", col='red')
+
+r = cor(~CO2_EMISSIONS, ~ENGINE_SIZE, data=filter(df, YEAR == '2020')) #
+r
+
+model= lm(CO2_EMISSIONS~ENGINE_SIZE, df)
+
+options(scipen=999)
+model$coef
+```
+
+
+```{r}
+predicts_co = model$fitted.values #place the predicted values of y for each observed x into a vector
+eis = model$residuals      #pull out the residuals
+diagnosticdf = data.frame(predicts_co, eis) #create a data frame of fitted.values and residuals
+
+ggplot(diagnosticdf, aes(sample = eis)) +  stat_qq(col='blue') + stat_qqline(col='red') + ggtitle("Normal Probability Plot of Residuals")
+
+ggplot(diagnosticdf, aes(x = predicts_co, y = eis)) +  geom_point(size=2, col='blue', position="jitter") + xlab("Predicted Average R_Suncor") + ylab("Residuals") + ggtitle("Plot of Fits to Residuals") + geom_hline(yintercept=0, color="red", linetype="dashed")
+
+```
+
+
+```{r}
+summary(aov(model)) 
+pvalue = 1 - pf(2842, 1, 1529)
+pvalue
+```
+
